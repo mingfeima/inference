@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-work_dir=/export/b07/ws15dgalvez/mlperf-rnnt-librispeech
+root_dir=`pwd`
+work_dir=$root_dir/mlperf-rnnt-librispeech
 local_data_dir=$work_dir/local_data
 librispeech_download_dir=$local_data_dir/LibriSpeech
 stage=3
@@ -19,7 +20,7 @@ set -u
 
 # stage -1: install dependencies
 if [[ $stage -le -1 ]]; then
-    conda env create --force -v --file environment.yml
+    conda env create --force --file environment.yml
 
     set +u
     source "$(conda info --base)/etc/profile.d/conda.sh"
@@ -30,7 +31,7 @@ if [[ $stage -le -1 ]]; then
     wget https://ftp.osuosl.org/pub/xiph/releases/flac/flac-1.3.2.tar.xz -O third_party/flac-1.3.2.tar.xz
     (cd third_party; tar xf flac-1.3.2.tar.xz; cd flac-1.3.2; ./configure --prefix=$install_dir && make && make install)
 
-    wget https://sourceforge.net/projects/sox/files/sox/14.4.2/sox-14.4.2.tar.gz -O third_party/sox-14.4.2.tar.gz
+    #wget https://sourceforge.net/projects/sox/files/sox/14.4.2/sox-14.4.2.tar.gz -O third_party/sox-14.4.2.tar.gz
     (cd third_party; tar zxf sox-14.4.2.tar.gz; cd sox-14.4.2; LDFLAGS="-L${install_dir}/lib" CFLAGS="-I${install_dir}/include" ./configure --prefix=$install_dir --with-flac && make && make install)
 
     (cd $(git rev-parse --show-toplevel)/loadgen; python setup.py install)
@@ -53,7 +54,7 @@ if [[ $stage -le 1 ]]; then
   python pytorch/utils/download_librispeech.py \
          pytorch/utils/librispeech-inference.csv \
          $librispeech_download_dir \
-         -e $local_data_dir
+         -e $local_data_dir --skip_download
 fi
 
 if [[ $stage -le 2 ]]; then
@@ -65,8 +66,8 @@ fi
 
 if [[ $stage -le 3 ]]; then
   for backend in pytorch; do
-    for accuracy in "--accuracy" ""; do
-      for scenario in SingleStream Offline Server; do
+    for accuracy in ""; do
+      for scenario in Offline; do
         log_dir=${work_dir}/${scenario}_${backend}
         if [ ! -z ${accuracy} ]; then
           log_dir+=_accuracy
