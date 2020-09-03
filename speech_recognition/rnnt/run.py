@@ -37,6 +37,8 @@ def get_args():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--perf_count", type=int, default=None)
     parser.add_argument("--log_dir", required=True)
+    parser.add_argument("--offline_batch_size", type=int, default=1)
+    parser.add_argument("--num_instances", type=int, default=1)
     args = parser.parse_args()
     return args
 
@@ -51,10 +53,13 @@ scenario_map = {
 def main():
     args = get_args()
 
+    batch_size = args.offline_batch_size if args.scenario == "Offline" else 1
+
     if args.backend == "pytorch":
         from pytorch_SUT import PytorchSUT
         sut = PytorchSUT(args.pytorch_config_toml, args.pytorch_checkpoint,
-                         args.dataset_dir, args.manifest, args.perf_count)
+                         args.dataset_dir, args.manifest, args.perf_count,
+                         batch_size, args.num_instances)
     else:
         raise ValueError("Unknown backend: {:}".format(args.backend))
 
@@ -84,7 +89,10 @@ def main():
         print(f"Running accuracy script: {cmd}")
         subprocess.check_call(cmd, shell=True)
 
+    lg.DestroySUT(sut.sut)
+
     print("Done!")
+
 
 
 if __name__ == "__main__":

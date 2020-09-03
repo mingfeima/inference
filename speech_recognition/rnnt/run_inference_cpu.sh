@@ -3,24 +3,39 @@
 # tcmalloc:
 export LD_PRELOAD=/home/mingfeim/packages/gperftools-2.8/install/lib/libtcmalloc.so
 
-CORES=`lscpu | grep Core | awk '{print $4}'`
-SOCKETS=`lscpu | grep Socket | awk '{print $2}'`
-TOTAL_CORES=`expr $CORES \* $SOCKETS`
-LAST_CORE=`expr $CORES - 1`
+sockets=`lscpu | grep Socket | awk '{print $2}'`
 
-KMP_SETTING="KMP_AFFINITY=granularity=fine,compact,1,0"
-KMP_BLOCKTIME=1
+root_dir=`pwd`
+work_dir=$root_dir/mlperf-rnnt-librispeech
+local_data_dir=$work_dir/local_data
 
-PREFIX="numactl --physcpubind=0-$LAST_CORE --membind=0"
+scenario=Offline
+if [[ "$1" == "--server" ]]; then
+    scenario=Server
+    shift
+fi
 
-export $KMP_SETTING
-export KMP_BLOCKTIME=$KMP_BLOCKTIME
+batch_size=1
+instances_per_socket=2
+num_instances=`expr $sockets \* $instances_per_socket`
 
-echo -e "\n### using $KMP_SETTING"
-echo -e "### using KMP_BLOCKTIME=$KMP_BLOCKTIME\n"
+backend=pytorch
+accuracy="" ### or "--accuracy"
 
-### single socket test
-echo -e "\n### using OMP_NUM_THREADS=$CORES"
-PREFIX="numactl --physcpubind=0-$LAST_CORE --membind=0"
-echo -e "### using $PREFIX\n"
-OMP_NUM_THREADS=$CORES $PREFIX ./run.sh
+log_dir=${work_dir}/${scenario}_${backend}
+if [ ! -z ${accuracy} ]; then
+    log_dir+=_accuracy
+fi
+log_dir+=rerun
+
+python run.py --dataset_dir $local_data_dir \
+    --manifest $local_data_dir/dev-clean-wav.json \
+    --pytorch_config_toml pytorch/configs/rnnt.toml \
+    --pytorch_checkpoint $work_dir/rnnt.pt \
+    --scenario ${scenario} \
+    --backend ${backend} \
+    --log_dir ${log_dir} \
+    --offline_batch_size ${batch_size} \
+    --num_instances $num_instances \
+    ${accuracy}
+
