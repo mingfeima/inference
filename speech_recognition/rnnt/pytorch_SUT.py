@@ -171,25 +171,45 @@ class Consumer(mp.Process):
             query_id_list = next_task.query_id_list
             query_idx_list = next_task.query_idx_list
             query_len = len(query_id_list)
-            for idx, id in zip(query_idx_list, query_id_list):
-                waveform = self.qsl[idx]
-                assert waveform.ndim == 1
-                waveform_length = np.array(waveform.shape[0], dtype=np.int64)
-                waveform = np.expand_dims(waveform, 0)
-                waveform_length = np.expand_dims(waveform_length, 0)
+            if query_len == 1:
+                for idx, id in zip(query_idx_list, query_id_list):
+                    waveform = self.qsl[idx]
+                    assert waveform.ndim == 1
+                    waveform_length = np.array(waveform.shape[0], dtype=np.int64)
+                    waveform = np.expand_dims(waveform, 0)
+                    waveform_length = np.expand_dims(waveform_length, 0)
+
+                    with torch.no_grad():
+                        waveform = torch.from_numpy(waveform)
+                        waveform_length = torch.from_numpy(waveform_length)
+                        feature, feature_length = self.audio_preprocessor.forward((waveform, waveform_length))
+                        assert feature.ndim == 3
+                        assert feature_length.ndim == 1
+                        feature = feature.permute(2, 0, 1)
+
+                        _, _, transcript = self.greedy_decoder.forward(feature, feature_length)
+
+                    assert len(transcript) == 1
+                    self.result_queue.put(Output(id, transcript[0]))
+            else:
+                waveform_list = []
+                for idx, id in zip(query_idx_list, query_id_list):
+                    waveform = self.qsl[idx]
+                    waveform_list.append(torch.from_numpy(waveform))
+                waveform_batch = torch.nn.utils.rnn.pad_sequence(waveform_list, batch_first=True)
+                waveform_lengths = torch.tensor([waveform.shape[0] for waveform in waveform_list],
+                                                                    dtype=torch.int64)
 
                 with torch.no_grad():
-                    waveform = torch.from_numpy(waveform)
-                    waveform_length = torch.from_numpy(waveform_length)
-                    feature, feature_length = self.audio_preprocessor.forward((waveform, waveform_length))
+                    feature, feature_length = self.audio_preprocessor.forward((waveform_batch, waveform_lengths))
                     assert feature.ndim == 3
                     assert feature_length.ndim == 1
                     feature = feature.permute(2, 0, 1)
+                    _, _, transcripts = self.greedy_decoder.forward(feature, feature_length)
 
-                    _, _, transcript = self.greedy_decoder.forward(feature, feature_length)
-
-                assert len(transcript) == 1
-                self.result_queue.put(Output(id, transcript))
+                assert len(transcripts) == query_len
+                for id, trans in zip(query_id_list, transcripts):
+                    self.result_queue.put(Output(id, trans))
 
             self.task_queue.task_done()
 
@@ -204,8 +224,7 @@ def response_loadgen(out_queue):
 
         query_id = next_task.query_id
         transcript = next_task.transcript
-        assert len(transcript) == 1
-        response_array = array.array('q', transcript[0])
+        response_array = array.array('q', transcript)
         bi = response_array.buffer_info()
         response = lg.QuerySampleResponse(query_id, bi[0],
                                           bi[1] * response_array.itemsize)
@@ -219,6 +238,7 @@ class PytorchSUT:
     def __init__(self, config_toml, checkpoint_path, dataset_dir,
                  manifest_filepath, perf_count, batch_size=1, num_instances=2):
         ### multi instance attributes
+        self.batch_size = batch_size
         self.num_instances = num_instances
         self.num_cores = get_num_cores()
         self.lock = mp.Lock()
@@ -261,6 +281,9 @@ class PytorchSUT:
         self.response_worker.start()
 
     def issue_queries(self, query_samples):
+        if self.batch_size != 1:
+            ### make sure samples in the same batch are about the same length
+            query_samples.sort(key=lambda k: self.qsl[k.index].shape[0])
         self.issue_queue.put(query_samples)
 
     def flush_queries(self):

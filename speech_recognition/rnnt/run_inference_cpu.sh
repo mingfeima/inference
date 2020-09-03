@@ -15,7 +15,7 @@ if [[ "$1" == "--server" ]]; then
     shift
 fi
 
-batch_size=1
+batch_size=32
 instances_per_socket=2
 num_instances=`expr $sockets \* $instances_per_socket`
 
