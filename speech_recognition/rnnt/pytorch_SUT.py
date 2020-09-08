@@ -32,6 +32,11 @@ import multiprocessing as mp
 import threading
 import time
 
+query_count = 0
+finish_count = 0
+start_time = time.time()
+debug = False
+
 def get_num_cores():
     cmd = "lscpu | awk '/^Core\(s\) per socket:/ {cores=$NF}; /^Socket\(s\):/ {sockets=$NF}; END{print cores*sockets}'"
     lscpu = os.popen(cmd).readlines()
@@ -103,7 +108,6 @@ class Consumer(mp.Process):
 
         self.model_init = False
 
-
     def run(self):
         import torch
 
@@ -172,6 +176,7 @@ class Consumer(mp.Process):
             query_idx_list = next_task.query_idx_list
             query_len = len(query_id_list)
             if query_len == 1:
+                t1 = time.time()
                 for idx, id in zip(query_idx_list, query_id_list):
                     waveform = self.qsl[idx]
                     assert waveform.ndim == 1
@@ -191,6 +196,10 @@ class Consumer(mp.Process):
 
                     assert len(transcript) == 1
                     self.result_queue.put(Output(id, transcript[0]))
+                t2 = time.time()
+                dur = t2 - t1
+                if debug:
+                    print("#### rank {} finish 1 sample in {:.3f} sec".format(self.rank, dur))
             else:
                 waveform_list = []
                 for idx, id in zip(query_idx_list, query_id_list):
@@ -215,6 +224,7 @@ class Consumer(mp.Process):
 
 
 def response_loadgen(out_queue):
+    global finish_count
     out_queue_cnt = 0
     while True:
         next_task = out_queue.get()
@@ -230,13 +240,16 @@ def response_loadgen(out_queue):
                                           bi[1] * response_array.itemsize)
         lg.QuerySamplesComplete([response])
         out_queue_cnt += 1
+        finish_count += 1
+        if debug:
+            print("#### finish {} samples".format(finish_count))
 
-    print("Finish processing {} samples: ".format(out_queue_cnt))
+    print("Finish processing {} samples".format(out_queue_cnt))
 
 
 class PytorchSUT:
     def __init__(self, config_toml, checkpoint_path, dataset_dir,
-                 manifest_filepath, perf_count, batch_size=1, num_instances=2):
+                 manifest_filepath, perf_count, batch_size=1, num_instances=2, enable_debug=False):
         ### multi instance attributes
         self.batch_size = batch_size
         self.num_instances = num_instances
@@ -280,11 +293,23 @@ class PytorchSUT:
         self.response_worker.daemon = True
         self.response_worker.start()
 
+        ### debug
+        global debug
+        debug = enable_debug
+
     def issue_queries(self, query_samples):
+        global start_time
+        global query_count
         if self.batch_size != 1:
             ### make sure samples in the same batch are about the same length
             query_samples.sort(key=lambda k: self.qsl[k.index].shape[0])
         self.issue_queue.put(query_samples)
+        end_time = time.time()
+        dur = end_time - start_time
+        start_time = end_time
+        query_count += len(query_samples)
+        if debug:
+            print('\n#### issue {} samples in {:.3f} sec: total {} samples'.format(len(query_samples), dur, query_count))
 
     def flush_queries(self):
         pass

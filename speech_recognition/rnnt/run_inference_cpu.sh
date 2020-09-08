@@ -15,6 +15,12 @@ if [[ "$1" == "--server" ]]; then
     shift
 fi
 
+debug=""
+if [[ "$1" == "--debug" ]]; then
+    debug="--debug"
+    shift
+fi
+
 batch_size=32
 instances_per_socket=2
 num_instances=`expr $sockets \* $instances_per_socket`
@@ -37,5 +43,6 @@ python run.py --dataset_dir $local_data_dir \
     --log_dir ${log_dir} \
     --offline_batch_size ${batch_size} \
     --num_instances $num_instances \
-    ${accuracy}
+    ${accuracy} \
+    ${debug}
 
